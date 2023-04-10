@@ -1,0 +1,161 @@
+[gd_scene load_steps=13 format=3 uid="uid://bqb68ovle6s7p"]
+
+[sub_resource type="Shader" id="Shader_0lyuh"]
+code = "shader_type sky;
+render_mode use_half_res_pass, use_debanding;
+
+uniform vec4 baseColor : source_color = vec4(0.0, 0.64, 0.84, 1.0);
+uniform vec4 horizonColor : source_color = vec4(0.36, 0.59, 0.86, 1.0);
+
+uniform float horizonHeight : hint_range(-1.0, 1.0, 0.01) = -0.2;
+uniform float rayleighCoefficient : hint_range(0.0, 1.0, 0.01) = 0.2;
+uniform float mieCoefficient : hint_range(0.0, 1.0, 0.01);
+uniform float mieEccentricity : hint_range(-1.0, 1.0, 0.01) = 0.8; 
+
+uniform float sunDiskScale: hint_range(0.0, 1.0, 0.01) = 0.2;
+uniform float sunSmoothing : hint_range(0.0, 1.0, 0.1) = 0.5;
+
+uniform sampler2D cloudTexture;
+uniform sampler2D cloudCoverageTexture;
+
+// Calculate the total amount of light scattered by Rayleigh scattering for all lights
+vec3 rayleighScattering(float cos_theta) {
+	float rayleighSunPhase = 0.75 * (1.0 + cos_theta * cos_theta);
+	vec3 rayleighColor = horizonColor.rgb * rayleighCoefficient * rayleighSunPhase;
+	
+	return rayleighColor;
+}
+
+// Calculate the total amount of light scattered by Mie scattering for all lights
+vec3 mieScattering(float cos_theta, float g) {
+	float mieSunPhase = ((1.0 - g * g) / (4.0 * PI)) * (1.0 + g * g - 2.0 * g * cos_theta) / pow(1.0 + g * g - 2.0 * g * cos_theta, 1.5);
+	vec3 mieColor = horizonColor.rgb * mieCoefficient * mieSunPhase;
+	
+	return mieColor;
+}
+
+void sky() {
+	// compute stereographic coordinates
+	float theta = acos(dot(EYEDIR, vec3(0, 1, 0)));
+	float phi = atan(EYEDIR.z, EYEDIR.x);
+	float r = 2.0 * tan(theta / 2.0);
+	vec2 stereographic = r * vec2(cos(phi), sin(phi));
+	vec2 texCoords = vec2(0.5, 0.5) + stereographic * vec2(0.5, -0.5);
+	
+	float cos_theta = dot(EYEDIR, LIGHT0_DIRECTION);
+	
+	// Solar disk
+	float sunDir = distance(EYEDIR, LIGHT0_DIRECTION);
+	float sunPos = 1.0 - clamp(sunDir / sunDiskScale, 0.0, 1.0);
+	float sunAngularDiameterCos = cos(sunPos * sunDiskScale);
+	float sunAngularDiameterCos2 = cos(sunPos * sunDiskScale * sunSmoothing);
+	float sunDisk = smoothstep(sunAngularDiameterCos, sunAngularDiameterCos2, cos_theta);
+	vec4 sun = vec4(LIGHT0_COLOR * LIGHT0_ENERGY, sunDisk);
+	
+	vec3 totalScattering = mieScattering(cos_theta, mieEccentricity) + rayleighScattering(cos_theta);
+	
+	vec4 clouds = mix(texture(cloudTexture, texCoords), vec4(0), texture(cloudCoverageTexture, texCoords));
+	float colorGradient = EYEDIR.y - horizonHeight;
+	vec3 skyColor;
+	skyColor = mix(horizonColor.rgb, baseColor.rgb, colorGradient);
+	skyColor = mix(skyColor.rgb, sun.rgb, sun.a);
+	skyColor = mix(skyColor.rgb, clouds.xyz, clouds.rgb);
+	
+	COLOR = skyColor + totalScattering;
+}
+"
+
+[sub_resource type="Gradient" id="Gradient_xvpjj"]
+interpolation_mode = 2
+offsets = PackedFloat32Array(0, 0.613402)
+
+[sub_resource type="FastNoiseLite" id="FastNoiseLite_jpm8m"]
+noise_type = 3
+seed = 3
+frequency = 0.02
+offset = Vector3(0, 128, 0)
+
+[sub_resource type="NoiseTexture2D" id="NoiseTexture2D_b4gwc"]
+generate_mipmaps = false
+seamless = true
+normalize = false
+color_ramp = SubResource("Gradient_xvpjj")
+noise = SubResource("FastNoiseLite_jpm8m")
+
+[sub_resource type="Gradient" id="Gradient_ic3qk"]
+offsets = PackedFloat32Array(0, 0.28866)
+
+[sub_resource type="FastNoiseLite" id="FastNoiseLite_bm43t"]
+noise_type = 3
+seed = 13
+frequency = 0.001
+offset = Vector3(5434, 128, 0)
+fractal_octaves = 2
+fractal_lacunarity = 20.0
+fractal_gain = 2.5
+
+[sub_resource type="NoiseTexture2D" id="NoiseTexture2D_h71jj"]
+generate_mipmaps = false
+seamless = true
+color_ramp = SubResource("Gradient_ic3qk")
+noise = SubResource("FastNoiseLite_bm43t")
+
+[sub_resource type="ShaderMaterial" id="ShaderMaterial_lif1f"]
+shader = SubResource("Shader_0lyuh")
+shader_parameter/baseColor = Color(0.176471, 0.607843, 0.937255, 1)
+shader_parameter/horizonColor = Color(0.878431, 0.470588, 0.0509804, 1)
+shader_parameter/horizonHeight = -0.2
+shader_parameter/rayleighCoefficient = 0.77
+shader_parameter/mieCoefficient = 0.0
+shader_parameter/mieEccentricity = 1.0
+shader_parameter/sunDiskScale = 0.2
+shader_parameter/sunSmoothing = 0.5
+shader_parameter/cloudTexture = SubResource("NoiseTexture2D_h71jj")
+shader_parameter/cloudCoverageTexture = SubResource("NoiseTexture2D_b4gwc")
+
+[sub_resource type="Sky" id="Sky_oyn2b"]
+sky_material = SubResource("ShaderMaterial_lif1f")
+
+[sub_resource type="Environment" id="Environment_k5ngp"]
+background_mode = 2
+sky = SubResource("Sky_oyn2b")
+ambient_light_source = 3
+ambient_light_sky_contribution = 0.0
+reflected_light_source = 2
+tonemap_mode = 1
+tonemap_exposure = 0.8
+ssr_enabled = true
+ssr_max_steps = 256
+ssao_enabled = true
+ssil_enabled = true
+sdfgi_enabled = true
+volumetric_fog_density = 0.01
+volumetric_fog_emission_energy = 0.0
+volumetric_fog_anisotropy = 0.9
+volumetric_fog_sky_affect = 0.8
+
+[sub_resource type="BoxMesh" id="BoxMesh_6w1sv"]
+size = Vector3(500, 1, 500)
+
+[sub_resource type="BoxMesh" id="BoxMesh_lu22r"]
+
+[node name="world" type="Node3D"]
+
+[node name="dirLight" type="DirectionalLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 0.642788, 0.766044, 0, -0.766044, 0.642788, 0, 0, 0)
+light_color = Color(0.901961, 0.85098, 0.784314, 1)
+shadow_enabled = true
+
+[node name="env" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_k5ngp")
+
+[node name="floor" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.5, 0)
+mesh = SubResource("BoxMesh_6w1sv")
+
+[node name="cube" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 0.5, 0)
+mesh = SubResource("BoxMesh_lu22r")
+
+[node name="cam" type="Camera3D" parent="."]
+transform = Transform3D(-0.642788, -0.383022, -0.663414, 0, 0.866025, -0.5, 0.766044, -0.321394, -0.55667, -3, 0.3, -5)
